@@ -9,7 +9,7 @@
 using namespace Corrade;
 using namespace Magnum;
 
-constexpr int n = 100'000;
+constexpr int n = 1'000'000;
 constexpr int m = 10000;
 
 struct PointCloud
@@ -85,47 +85,48 @@ int main() {
     }
 
 
-    //{
-    //    for (uint32_t i = 0; i < 10; ++i) {
-    //        ScopedTimer t{"KDTree Construction", true};
-    //        KDTree tree(cloud.pts);
-    //        doNotOptimize(tree);
-    //    }
+    {
+        for (uint32_t i = 0; i < 10; ++i) {
+            ScopedTimer t{"KDTree Construction", true};
+            KDTree tree(cloud.pts);
+            doNotOptimize(tree);
+        }
 
-    //}
+    }
 
-    //{
-    //    for (uint32_t i = 0; i < 10; ++i) {
-    //        ScopedTimer t{"nano flann Construction", true};
-    //        adapter_t adapter{cloud};
-    //        kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
-    //        index.buildIndex();
-    //        doNotOptimize(index);
-    //    }
-    //}
+    {
+        for (uint32_t i = 0; i < 10; ++i) {
+            ScopedTimer t{"nano flann Construction", true};
+            adapter_t adapter{cloud};
+            kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
+            index.buildIndex();
+            doNotOptimize(index);
+        }
+    }
 
-    //adapter_t adapter{cloud};
-    //kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
-    //index.buildIndex();
+    adapter_t adapter{cloud};
+    kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
+    index.buildIndex();
 
     KDTree tree(cloud.pts);
 
     for (auto const& q : queries) {
-        //ScopedTimer t{"KDTree Query"};
+        ScopedTimer t{"KDTree Query"};
         auto result = tree.nearestNeighbor(q);
+
         doNotOptimize(result);
     }
 
-    //for(auto const& q : queries){
-    //    ScopedTimer t{"nano flann Query"};
-    //    const size_t num_results = 1;
-    //    size_t ret_index;
-    //    float out_dist_sqr;
-    //    nanoflann::KNNResultSet<float> resultSet(num_results);
-    //    resultSet.init(&ret_index, &out_dist_sqr);
-    //    index.findNeighbors(resultSet, q.data(), nanoflann::SearchParams{});
-    //    doNotOptimize(resultSet);
-    //}
+    for(auto const& q : queries){
+        ScopedTimer t{"nano flann Query"};
+        const size_t num_results = 1;
+        size_t ret_index;
+        float out_dist_sqr;
+        nanoflann::KNNResultSet<float> resultSet(num_results);
+        resultSet.init(&ret_index, &out_dist_sqr);
+        index.findNeighbors(resultSet, q.data(), nanoflann::SearchParams{});
+        doNotOptimize(resultSet);
+    }
 
     ScopedTimer::printStatistics();
     return 0;

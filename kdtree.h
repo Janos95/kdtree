@@ -7,10 +7,12 @@
 
 #include <Magnum/Magnum.h>
 #include <Magnum/Math/Vector3.h>
+#include <Magnum/Math/Distance.h>
 #include <Magnum/Math/Range.h>
 #include <Magnum/Math/Functions.h>
 #include <Magnum/Math/FunctionsBatch.h>
 #include <Corrade/Containers/Array.h>
+#include <Corrade/Containers/StridedArrayView.h>
 
 #include <algorithm>
 #include <string>
@@ -35,7 +37,7 @@ Math::Range<Size, T> trim(
 }
 
 template<class Vector>
-auto distanceSq(Vector const& p, Math::Range<Vector::Size, typename Vector::Type> const& range){
+typename Vector::Type bbDistanceSq(Vector const& p, Math::Range<Vector::Size, typename Vector::Type> const& range){
     using Type = typename Vector::Type;
     Type dsq{0};
     for (int j = 0; j < Vector::Size; ++j){
@@ -67,7 +69,9 @@ public:
     using Range = Math::Range<Size, Type>;
     using NodeHandle = int32_t;
 
-    explicit KDTree(Containers::ArrayView<Vector> const& points) :
+    KDTree() = default;
+
+    explicit KDTree(Containers::StridedArrayView1D<const Vector> const& points) :
             m_nodes(Containers::NoInit, points.size()),
             m_points(points),
             m_bb(Math::minmax(points))
@@ -83,6 +87,7 @@ public:
     auto leftChild(NodeHandle handle) const { return m_nodes[handle].leftChild; }
     auto rightChild(NodeHandle handle) const { return m_nodes[handle].rightChild; }
     auto root() const { return m_root; }
+    auto bb() const { return m_bb; }
 
     struct NNResult{
         int pointIndex;
@@ -124,26 +129,30 @@ private:
         if(nodeId == Node::Invalid) return;
         auto const& node = m_nodes[nodeId];
         auto const& p = m_points[node.pointIndex];
-        if(distanceSq(q, bb) > result.distanceSquared) return;
+        /* prune by computing distance to bounding box, @todo does this actually speed things up */
+        if(bbDistanceSq(q, bb) > result.distanceSquared) return;
         auto distSq = (p - q).dot();
         if(distSq < result.distanceSquared){
             result.distanceSquared = distSq;
             result.pointIndex = node.pointIndex;
         }
         auto nextCd = (cd+1) % Size;
-        if(q[cd] < p[cd]){
+        if(q[cd] < p[cd]){ /* q is closer to left child */
             recurse(q, node.leftChild, nextCd, trim<Side::Left>(bb, cd, p), result);
+            /* prune by computing distance to splitting plane */
+            if(p[cd] - q[cd] < result.distanceSquared)
+                recurse(q, node.rightChild, nextCd, trim<Side::Right>(bb, cd, p), result);
+        } else { /* q is closer to right child */
             recurse(q, node.rightChild, nextCd, trim<Side::Right>(bb, cd, p), result);
-        } else {
-            recurse(q, node.rightChild, nextCd, trim<Side::Right>(bb, cd, p), result);
-            recurse(q, node.leftChild, nextCd, trim<Side::Left>(bb, cd, p), result);
+            if(q[cd] - p[cd] < result.distanceSquared)
+                recurse(q, node.leftChild, nextCd, trim<Side::Left>(bb, cd, p), result);
         }
     }
 
     int m_root;
     Range m_bb;
     Containers::Array<Node> m_nodes;
-    Containers::ArrayView<Vector> m_points;
+    Containers::StridedArrayView1D<const Vector> m_points;
 };
 
 /* deduction guide */
@@ -159,8 +168,7 @@ void formatTree(
         bool isLeft,
         const char* arrow)
 {
-    if(handle != KDTree<T>::Node::Invalid)
-    {
+    if(handle != KDTree<T>::Node::Invalid){
         debug << prefix.c_str() << arrow << tree.point(handle) << "\n";
         // enter the next tree level - left and right branch
 
