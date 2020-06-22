@@ -1,7 +1,11 @@
+
+#define CORRADE_STANDARD_ASSERT
+
 #include "kdtree.h"
 #include <scoped_timer/scoped_timer.hpp>
 
 #include <Corrade/Containers/GrowableArray.h>
+#include <Magnum/Platform/WindowlessEglApplication.h>
 
 #include <nanoflann.hpp>
 #include <random>
@@ -11,6 +15,8 @@ using namespace Magnum;
 
 constexpr int n = 1'000'000;
 constexpr int m = 10000;
+
+constexpr int maxLeafSize = 1;
 
 struct PointCloud
 {
@@ -69,6 +75,8 @@ CORRADE_ALWAYS_INLINE void doNotOptimize(T const& value) {
 
 int main() {
 
+    Mg::Platform::WindowlessEglContext context{{}};
+
     Containers::Array<Vector3> queries(Containers::NoInit, m);
     PointCloud cloud;
     Containers::arrayResize(cloud.pts, Containers::NoInit, n);
@@ -84,50 +92,79 @@ int main() {
         q = Vector3(dist(engine), dist(engine), dist(engine));
     }
 
+    //{
+    //    for (uint32_t i = 0; i < 10; ++i) {
+    //        ScopedTimer t{"KDTree Construction", true};
+    //        KDTree tree(cloud.pts);
+    //        doNotOptimize(tree);
+    //    }
 
-    {
-        for (uint32_t i = 0; i < 10; ++i) {
-            ScopedTimer t{"KDTree Construction", true};
-            KDTree tree(cloud.pts);
-            doNotOptimize(tree);
-        }
+    //}
 
-    }
-
-    {
-        for (uint32_t i = 0; i < 10; ++i) {
-            ScopedTimer t{"nano flann Construction", true};
-            adapter_t adapter{cloud};
-            kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
-            index.buildIndex();
-            doNotOptimize(index);
-        }
-    }
+    //{
+    //    for (uint32_t i = 0; i < 10; ++i) {
+    //        ScopedTimer t{"nano flann Construction", true};
+    //        adapter_t adapter{cloud};
+    //        kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(maxLeafSize));
+    //        index.buildIndex();
+    //        doNotOptimize(index);
+    //    }
+    //}
 
     adapter_t adapter{cloud};
-    kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */) );
+    kd_tree_t index(3 /*dim*/, adapter, nanoflann::KDTreeSingleIndexAdaptorParams(maxLeafSize));
     index.buildIndex();
 
     KDTree tree(cloud.pts);
+    tree.upload();
 
-    for (auto const& q : queries) {
-        ScopedTimer t{"KDTree Query"};
-        auto result = tree.nearestNeighbor(q);
+    return 1;
 
-        doNotOptimize(result);
+    Containers::Array<float> resultsFlann(Containers::NoInit, queries.size());
+    Containers::Array<float> resultsGpu(Containers::NoInit, queries.size());
+    Containers::Array<float> resultsCpu(Containers::NoInit, queries.size());
+    Containers::Array<UnsignedInt> indicesGpu(Containers::NoInit, queries.size());
+
+    {
+        ScopedTimer t{"Cpu Query", true};
+        for (uint32_t i = 0; i < queries.size(); ++i) {
+            auto result = tree.nearestNeighbor(queries[i]);
+            resultsCpu[i] = sqrt(result.distanceSquared);
+        }
     }
 
-    for(auto const& q : queries){
-        ScopedTimer t{"nano flann Query"};
-        const size_t num_results = 1;
-        size_t ret_index;
-        float out_dist_sqr;
-        nanoflann::KNNResultSet<float> resultSet(num_results);
-        resultSet.init(&ret_index, &out_dist_sqr);
-        index.findNeighbors(resultSet, q.data(), nanoflann::SearchParams{});
-        doNotOptimize(resultSet);
+    {
+        ScopedTimer t{"Gpu Query", true};
+        tree.acceleratedNearestNeighborInto(queries, resultsGpu, indicesGpu);
     }
 
-    ScopedTimer::printStatistics();
+    {
+        ScopedTimer t{"nano flann Query", true};
+        for (uint32_t i = 0; i < queries.size(); ++i) {
+            const size_t num_results = 1;
+            size_t ret_index;
+            float out_dist_sqr;
+            nanoflann::KNNResultSet<float> resultSet(num_results);
+            resultSet.init(&ret_index, &out_dist_sqr);
+            index.findNeighbors(resultSet, queries[i].data(), nanoflann::SearchParams{});
+            resultsFlann[i] = Mg::Math::sqrt(out_dist_sqr);
+        }
+    }
+
+    bool gpuCorrect = true, cpuCorrect = true;
+    for (uint32_t j = 0; j < queries.size(); ++j) {
+       if(Mg::Math::abs(resultsFlann[j] - resultsCpu[j]) > 1e-7)
+           cpuCorrect = false;
+       if(Mg::Math::abs(resultsFlann[j] - resultsGpu[j]) > 1e-7)
+           gpuCorrect = false;
+    }
+    if(!cpuCorrect)
+        printf("Cpu is not correct :(\n");
+    else
+        printf("Cpu is correct :)\n");
+    if(!gpuCorrect)
+        printf("Gpu is not correct :(\n");
+    else
+        printf("Gpu is correct :)\n");
     return 0;
 }

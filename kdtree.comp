@@ -1,0 +1,98 @@
+layout(local_size_x = 1) in;
+layout(rgb32i, binding = 0) uniform image2D nodes;
+layout(rgb32f, binding = 1) uniform image2D points;
+layout(rgb32f, binding = 2) uniform image2D queries;
+layout(r32f, binding = 3) uniform image2D distances;
+layout(r32u, binding = 4) uniform image2D indices;
+
+#define INVALID_NODE -1
+#define LEFT_SIDE 0
+#define RIGHT_SIDE 1
+#define ROOT 0
+
+struct Result{
+    float distanceSquared;
+    int pointIndex;
+};
+
+struct Range{
+    vec3 min, max;
+};
+
+struct Node{
+    int leftChild;
+    int rightChild;
+    int pointIndex;
+};
+
+struct StackElement{
+    int nodeIndex;
+    int cd;
+};
+
+StackElement STACK[STACK_SIZE];
+int stackSize;
+
+void push(StackElement node){
+    STACK[stackSize++] = node;
+}
+
+StackElement pop(){
+    return STACK[stackSize--];
+}
+
+void initStack(){
+    stackSize = 0;
+}
+
+bool empty(){
+    return stackSize == 0;
+}
+
+/* @todo one can use int's to index the textures, figure this out!! */
+Node getNode(int i){
+    return texture(nodes, vec2(float(i)/float(numNodes),0.0));
+}
+
+vec3 getPoint(int i){
+    return texture(points, vec2(float(i)/float(numPoints),0.0));
+}
+
+Result nearestNeighbor(vec3 q){
+    Result result;
+    result.distanceSquared = 1./0.;  /* there is no predefined inf macro */
+
+    initStack();
+    push(getNode(ROOT));
+
+    while(!empty()){
+        StackElement element = pop();
+        Node node = getNode(element.nodeIndex);
+        vec3 p = getPoint(node.pointIndex);
+
+        float distSq = (p - q).dot();
+        if(distSq < result.distanceSquared){
+            result.distanceSquared = distSq;
+            result.pointIndex = node.pointIndex;
+        }
+        int nextCd = (element.cd + 1) % Size;
+        if(q[cd] < p[cd]){ /* q is closer to left child */
+            push(StackElement(node.leftChild, nextCd));
+            /* prune by computing distance to splitting plane */
+            if(p[cd] - q[cd] < result.distanceSquared)
+                push(StackElement(node.rightChild, nextCd));
+        } else { /* q is closer to right child */
+            push(StackElement(node.rightChild, nextCd));
+            if(q[cd] - p[cd] < result.distanceSquared)
+                push(StackElement(node.leftChild, nextCd));
+        }
+    }
+    return result;
+}
+
+void main(){
+    int i = gl_GlobalInvocationID.x;
+    Result result = nearestNeighbor(query);
+    imageStore(distances, i, sqrt(result.distanceSquared));
+    imageStore(indices, i, result.pointIndex);
+}

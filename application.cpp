@@ -33,9 +33,11 @@
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/MeshTools/Transform.h>
 #include <Magnum/Math/Color.h>
-#include <Magnum/Math/Packing.h>
+#include <Magnum/Math/Quaternion.h>
 
 #include <MagnumPlugins/AssimpImporter/AssimpImporter.h>
+
+#include <random>
 
 using namespace Magnum;
 using namespace Corrade;
@@ -207,6 +209,17 @@ void KdTreeDrawable::draw(const Matrix4& tf, SceneGraph::Camera3D& camera){
             .draw(cubeWire);
 }
 
+template <class T = Float>
+Math::Quaternion<T> randomRotation(){
+    //http://planning.cs.uiuc.edu/node198.html
+    static std::default_random_engine engine(std::random_device{}());
+    static std::uniform_real_distribution<T> dist(0,1);
+    auto u = randomScalar(dist(engine));
+    auto v = 2 * Math::Constants<T>::pi() * randomScalar(dist(engine));
+    auto w = 2 * Math::Constants<T>::pi() * randomScalar(dist(engine));
+    return {{sqrt<T>(1 - u) * std::sin(v), sqrt<T>(1 - u) * std::cos(v), sqrt<T>(u) * std::sin(w)}, sqrt<T>(u) * std::cos(w)};
+}
+
 struct PhongDrawable : Drawable
 {
 public:
@@ -240,6 +253,7 @@ public:
     Color4 color{0x2f83cc_rgbf};
 };
 
+
 class KdTreeApplication: public Platform::Application {
 public:
     explicit KdTreeApplication(const Arguments& arguments);
@@ -261,6 +275,7 @@ private:
     GL::Texture2D texture{Magnum::NoCreate};
     KDTree<Vector3> tree;
     KdTreeDrawable* treeDrawable;
+    PhongDrawable* test;
     Shaders::Phong phong{Magnum::NoCreate};
 
     uint32_t depth = 4;
@@ -304,7 +319,7 @@ KdTreeApplication::KdTreeApplication(const Arguments& arguments):
         if (sceneImporter->meshCount() && sceneImporter->mesh(0)) {
             meshData = *(sceneImporter->mesh(0));
             mesh = MeshTools::compile(meshData);
-            tree = KDTree<Vector3>{meshData.attribute<Vector3>(Trade::MeshAttribute::Position)};
+            tree = KDTree{meshData.attribute<Vector3>(Trade::MeshAttribute::Position)};
         } else std::exit(3);
 
         auto imageImporter = manager.loadAndInstantiate("PngImporter");
@@ -325,6 +340,7 @@ KdTreeApplication::KdTreeApplication(const Arguments& arguments):
 
         auto object = new Object3D{&scene};
         new PhongDrawable{*object, mesh, texture, phong, &drawables};
+        test = new PhongDrawable{*object, mesh, texture, phong, &drawables};
     }
 
     GL::Renderer::enable(GL::Renderer::Feature::DepthTest);
